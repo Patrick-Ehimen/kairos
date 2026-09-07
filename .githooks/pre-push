@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CONTRACTS_DIR="$REPO_ROOT/contracts"
+
+if git diff --name-only "@{push}" HEAD 2>/dev/null | grep -q '^contracts/' \
+   || ! git rev-parse --verify --quiet '@{push}' >/dev/null; then
+  echo "[pre-push] running forge test in contracts/"
+  cd "$CONTRACTS_DIR"
+  forge test
+fi

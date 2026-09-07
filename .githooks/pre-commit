@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CONTRACTS_DIR="$REPO_ROOT/contracts"
+
+if git diff --cached --name-only | grep -q '^contracts/'; then
+  echo "[pre-commit] contracts/ changed — running forge fmt --check && forge build"
+  cd "$CONTRACTS_DIR"
+  forge fmt --check
+  forge build
+fi
