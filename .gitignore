@@ -18,7 +18,7 @@ target
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+.idea/
 
 
 # Contracts (Build artifacts)
@@ -26,3 +26,16 @@ target
 /contracts/out/
 /build/bin
 /contracts/broadcast
+
+
+# Claude/AI tooling
+.mcp.json
+.claude/
+
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
