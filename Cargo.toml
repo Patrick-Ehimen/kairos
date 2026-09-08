@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["modules/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.94"
+license = "MIT"
+repository = "https://github.com/0xOse/kairos"
+
+[workspace.dependencies]
+kairos-core = { path = "modules/core" }
+kairos-mempool = { path = "modules/mempool" }
+kairos-dex = { path = "modules/dex" }
+kairos-state = { path = "modules/state" }
+kairos-sim = { path = "modules/sim" }
+kairos-detector = { path = "modules/detector" }
+kairos-server = { path = "modules/server" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

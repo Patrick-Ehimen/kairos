@@ -1,0 +1,19 @@
+[package]
+name = "kairos-e2e"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+kairos-core.workspace = true
+kairos-mempool.workspace = true
+kairos-dex.workspace = true
+kairos-state.workspace = true
+kairos-sim.workspace = true
+kairos-detector.workspace = true
+kairos-server.workspace = true
