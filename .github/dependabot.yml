@@ -29,9 +29,10 @@ updates:
       - "dependencies"
       - "ci"
 
-  # Maintain dependencies for Foundry (Solidity)
-  - package-ecosystem: "cargo"
-    directory: "/contracts"
+  # Maintain Foundry's Solidity dependencies, which are git submodules
+  # under contracts/lib and declared in .gitmodules at the repo root.
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"

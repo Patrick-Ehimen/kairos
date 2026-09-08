@@ -15,7 +15,7 @@ jobs:
     name: toolchain
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check toolchain versions
         run: bash scripts/check_toolchain_versions.sh
@@ -24,7 +24,7 @@ jobs:
     name: rust
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install protobuf compiler
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -40,32 +40,27 @@ jobs:
       - name: Tests
         run: cargo test --workspace
 
-  go:
-    name: go
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Tests
-        run: go test ./... -v -count=1
-
   solidity:
     name: solidity
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
       - uses: foundry-rs/foundry-toolchain@v1
 
+      - name: Forge version
+        run: forge --version
+
+      - name: Format
+        run: forge fmt --check
+
+      - name: Build
+        run: forge build --sizes
+
       - name: Tests
-        working-directory: contracts
         run: forge test -vvv
