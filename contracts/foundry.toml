@@ -2,5 +2,27 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+solc = "0.8.28"
+
+
+# VERIFY before deploy: cancun gates TSTORE/TLOAD. Mainnet has it; on Arbitrum it
+# arrived with ArbOS 32. Confirm the target chain's ArbOS version supports it, or
+# drop to "shanghai" and swap ReentrancyGuardTransient -> ReentrancyGuard and the
+# transient slots -> storage.
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 1_000_000
+bytecode_hash = "none"
+
+[profile.default.fmt]
+line_length = 110
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+
+[rpc_endpoints]
+mainnet = "${ETH_RPC_URL}"
+arbitrum = "${ARBITRUM_RPC_URL}"
+
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
