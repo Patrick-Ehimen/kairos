@@ -247,29 +247,45 @@ abstract contract KairosExecutorBase is Ownable2Step, ReentrancyGuardTransient, 
         if (initiator != address(this)) revert Err.InvalidInitiator();
         if (!_reentrancyGuardEntered()) revert Err.NotInRoute();
 
+        // Aave has already sent the principal, so this is idle inventory plus `amount`.
+        // Settlement counts profit only above it.
+        uint256 startBalance = IERC20(asset).balanceOf(address(this));
+
         (SwapStep[] memory steps, uint256 minProfitOut, bytes memory hookData) =
             abi.decode(params, (SwapStep[], uint256, bytes));
 
-        address tokenIn = asset;
-        uint256 amountIn = amount; // hop 0 spends exactly the borrowed principal
-        uint256 n = steps.length;
-        for (uint256 i = 0; i < n; ++i) {
-            amountIn = _executeSwap(steps[i], tokenIn, amountIn, i);
-            tokenIn = steps[i].tokenOut;
-        }
+        _runRoute(steps, asset, amount);
 
-        uint256 profit = _settle(asset, amount, premium, minProfitOut);
+        uint256 profit = _settle(asset, amount, premium, minProfitOut, startBalance);
         _distribute(asset, profit, hookData);
 
         emit Ev.ArbExecuted(asset, amount, premium, profit, gasStart - gasleft());
         return true;
     }
 
+    /// @dev Hop 0 spends exactly the borrowed principal; every later hop spends exactly
+    ///      the previous hop's measured output.
+    function _runRoute(SwapStep[] memory steps, address asset, uint256 amount) private {
+        address tokenIn = asset;
+        uint256 amountIn = amount;
+        uint256 n = steps.length;
+        for (uint256 i = 0; i < n; ++i) {
+            amountIn = _executeSwap(steps[i], tokenIn, amountIn, i);
+            tokenIn = steps[i].tokenOut;
+        }
+    }
+
     /// @dev Ensure the pool can pull the debt, then measure and floor-check profit.
-    function _settle(address asset, uint256 amount, uint256 premium, uint256 minProfitOut)
-        private
-        returns (uint256 profit)
-    {
+    ///      Profit is only what the route added above the balance held when the loan
+    ///      arrived: idle inventory is never paid out, never tipped away, and never lets
+    ///      a losing route clear the floor.
+    function _settle(
+        address asset,
+        uint256 amount,
+        uint256 premium,
+        uint256 minProfitOut,
+        uint256 startBalance
+    ) private returns (uint256 profit) {
         uint256 totalDebt = amount + premium;
         IERC20 token = IERC20(asset);
 
@@ -277,12 +293,14 @@ abstract contract KairosExecutorBase is Ownable2Step, ReentrancyGuardTransient, 
             token.forceApprove(AAVE_POOL, type(uint256).max);
         }
 
+        // Pre-existing inventory plus the debt: the part of the balance that is not profit.
+        uint256 reserved = startBalance - amount + totalDebt;
         uint256 balance = token.balanceOf(address(this));
-        if (balance < totalDebt + minProfitOut) {
-            revert Err.InsufficientProfit(balance < totalDebt ? 0 : balance - totalDebt, minProfitOut);
+        if (balance < reserved + minProfitOut) {
+            revert Err.InsufficientProfit(balance < reserved ? 0 : balance - reserved, minProfitOut);
         }
         unchecked {
-            profit = balance - totalDebt;
+            profit = balance - reserved;
         }
     }
 
