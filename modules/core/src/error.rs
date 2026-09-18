@@ -60,3 +60,50 @@ pub enum KairosError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
+
+#[cfg(tests)]
+mod tests {
+    use super::*;
+    use alloy::primitives::Address;
+
+    #[test]
+    fn test_pool_not_found_display() {
+        let err = KairosError::PoolNotFound(Address::ZERO);
+        let msg = err.to_string();
+        assert!(msg.contains("pool not found"));
+        assert!(msg.contains(&Address::ZERO.to_string()));
+    }
+
+    #[test]
+    fn test_no_opportunity_display() {
+        let err = AetherError::NoOpportunity;
+        assert_eq!(err.to_string(), "No arbitrage opportunity found");
+    }
+
+    #[test]
+    fn test_invalid_token_pair_display() {
+        let err = AetherError::InvalidTokenPair {
+            token_in: Address::ZERO,
+            token_out: Address::ZERO,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("Invalid token pair"));
+    }
+
+    #[test]
+    fn test_insufficient_liquidity_display() {
+        let err = AetherError::InsufficientLiquidity(Address::ZERO);
+        assert!(err.to_string().contains("Insufficient liquidity"));
+    }
+
+    #[test]
+    fn test_profit_below_threshold_display() {
+        let err = AetherError::ProfitBelowThreshold {
+            profit_wei: "100".to_string(),
+            min_profit_wei: "1000".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("100"));
+        assert!(msg.contains("1000"));
+    }
+}
