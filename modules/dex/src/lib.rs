@@ -25,7 +25,7 @@ pub mod registry;
 use alloy::primitives::{Address, U256};
 use kairos_core::{AmmKind, PoolId, Result, SwapStep};
 
-pub use concentrated::{ConcentratedLiquidityPool, SwapOutcome};
+pub use concentrated::{ConcentratedLiquidityPool, SwapOutcome, TickLiquidity};
 pub use constant_product::ConstantProductPool;
 pub use registry::PoolRegistry;
 
