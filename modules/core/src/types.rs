@@ -173,6 +173,7 @@ pub struct Token {
 /// Pools are tiered by activity / TVL so that refresh budget is spent on the
 /// pools most likely to be part of a profitable route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PoolTier {
     /// Refreshed every block.
     Hot,

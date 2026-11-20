@@ -116,6 +116,11 @@ pub enum KairosError {
     #[error("Node connection failed: {0}")]
     NodeConnectionFailed(String),
 
+    /// A log from the node could not be decoded into a known pool event
+    /// (unknown topic, malformed data, or missing block position).
+    #[error("Invalid event log: {0}")]
+    InvalidLog(String),
+
     /// Every configured node is unhealthy; the engine cannot observe the chain.
     #[error("All nodes unhealthy")]
     AllNodesUnhealthy,
