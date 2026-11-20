@@ -39,6 +39,12 @@ pub enum KairosError {
     #[error("Insufficient liquidity in pool {0}")]
     InsufficientLiquidity(Address),
 
+    /// An on-chain event cannot be applied to the locally tracked pool state
+    /// (for example a burn of more liquidity than the pool holds), so the
+    /// local copy has drifted from the chain. Reload the pool from chain.
+    #[error("State of pool {pool} is out of sync with chain: {reason}")]
+    StateDesync { pool: Address, reason: String },
+
     // ---------------------------------------------------------------------
     // Detection
     // ---------------------------------------------------------------------
@@ -181,6 +187,17 @@ mod tests {
     fn test_insufficient_liquidity_display() {
         let err = KairosError::InsufficientLiquidity(Address::ZERO);
         assert!(err.to_string().contains("Insufficient liquidity"));
+    }
+
+    #[test]
+    fn test_state_desync_display() {
+        let err = KairosError::StateDesync {
+            pool: Address::ZERO,
+            reason: "liquidity underflow".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("out of sync"));
+        assert!(msg.contains("liquidity underflow"));
     }
 
     #[test]

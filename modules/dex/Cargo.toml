@@ -8,3 +8,4 @@ repository.workspace = true
 
 [dependencies]
 kairos-core.workspace = true
+alloy.workspace = true
