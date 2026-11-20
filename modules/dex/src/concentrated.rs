@@ -281,6 +281,17 @@ impl ConcentratedLiquidityPool {
         self.fee_pips
     }
 
+    /// Distance between usable ticks.
+    pub fn tick_spacing(&self) -> i32 {
+        self.tick_spacing
+    }
+
+    /// Range the loaded tick data is complete for, or `None` if no ticks have
+    /// been loaded. Swaps that would reach past it return `None`.
+    pub fn tick_coverage(&self) -> Option<RangeInclusive<i32>> {
+        self.tick_coverage.clone()
+    }
+
     /// Simulates `UniswapV3Pool.swap` with the price limit the executor uses
     /// (`MIN_SQRT_RATIO + 1` / `MAX_SQRT_RATIO - 1`).
     ///
