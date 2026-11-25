@@ -1,17 +1,18 @@
 //! Decoding of the pool events that change pricing state.
 //!
-//! Four events cover every change a quote depends on:
+//! Five events cover every change a quote depends on:
 //!
-//! | Event      | ABI          | Applied with                                 |
-//! |------------|--------------|----------------------------------------------|
-//! | `Sync`     | Uniswap V2   | `ConstantProductPool::set_reserves`          |
-//! | `Swap`     | Uniswap V3   | `ConcentratedLiquidityPool::set_slot0`       |
-//! | `Mint`     | Uniswap V3   | `ConcentratedLiquidityPool::apply_liquidity_delta` |
-//! | `Burn`     | Uniswap V3   | `ConcentratedLiquidityPool::apply_liquidity_delta` |
+//! | Event                   | ABI                   | Applied with                                 |
+//! |-------------------------|-----------------------|----------------------------------------------|
+//! | `Sync(uint112,uint112)` | Uniswap V2            | `ConstantProductPool::set_reserves`          |
+//! | `Sync(uint256,uint256)` | Aerodrome V2          | `ConstantProductPool::set_reserves`          |
+//! | `Swap`                  | Uniswap V3, Slipstream | `ConcentratedLiquidityPool::set_slot0`      |
+//! | `Mint`                  | Uniswap V3, Slipstream | `ConcentratedLiquidityPool::apply_liquidity_delta` |
+//! | `Burn`                  | Uniswap V3, Slipstream | `ConcentratedLiquidityPool::apply_liquidity_delta` |
 //!
-//! V2 emits `Sync` after every swap, mint and burn, so its other events are
-//! not needed. V3's remaining events (`Collect`, `Flash`, …) do not move
-//! price or liquidity. Subscribe with [`TOPICS`] to receive only these.
+//! V2-style pools emit `Sync` after every swap, mint and burn, so their other
+//! events are not needed. V3's remaining events (`Collect`, `Flash`, …) do not
+//! move price or liquidity. Subscribe with [`TOPICS`] to receive only these.
 
 use alloy::primitives::{Address, B256, U256};
 use alloy::rpc::types::Log;
@@ -21,6 +22,12 @@ use kairos_core::{KairosError, Result};
 mod v2 {
     alloy::sol! {
         event Sync(uint112 reserve0, uint112 reserve1);
+    }
+}
+
+mod aerodrome {
+    alloy::sol! {
+        event Sync(uint256 reserve0, uint256 reserve1);
     }
 }
 
@@ -56,8 +63,9 @@ mod v3 {
 }
 
 /// `topic0` of every event in [`PoolEvent`], for the log subscription filter.
-pub const TOPICS: [B256; 4] = [
+pub const TOPICS: [B256; 5] = [
     v2::Sync::SIGNATURE_HASH,
+    aerodrome::Sync::SIGNATURE_HASH,
     v3::Swap::SIGNATURE_HASH,
     v3::Mint::SIGNATURE_HASH,
     v3::Burn::SIGNATURE_HASH,
@@ -66,7 +74,7 @@ pub const TOPICS: [B256; 4] = [
 /// A decoded state-changing pool event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PoolEvent {
-    /// V2 `Sync`: the reserves after the transaction.
+    /// V2-style `Sync`: the reserves after the transaction.
     Sync { reserve0: U256, reserve1: U256 },
     /// V3 `Swap`: the active state after the swap.
     Swap {
@@ -90,6 +98,9 @@ pub struct PoolLog {
     pub pool: Address,
     /// Block the log was included in.
     pub block_number: u64,
+    /// Hash of that block, to tell a log apart from one at the same position
+    /// in a block that was reorged out.
+    pub block_hash: B256,
     /// Index of the log within its block.
     pub log_index: u64,
     /// `true` if the log was dropped by a reorg and must be undone.
@@ -110,7 +121,8 @@ impl PoolLog {
     ///
     /// [`KairosError::InvalidLog`] if `topic0` is not in [`TOPICS`], the
     /// payload does not match the event, the log has no block number or log
-    /// index (pending logs), or a liquidity amount does not fit in `int128`.
+    /// index or block hash (pending logs), or a liquidity amount does not fit
+    /// in `int128`.
     pub fn decode(log: &Log) -> Result<Self> {
         let invalid = |reason: String| {
             KairosError::InvalidLog(format!(
@@ -119,8 +131,12 @@ impl PoolLog {
                 log.transaction_hash
             ))
         };
-        let (Some(block_number), Some(log_index)) = (log.block_number, log.log_index) else {
-            return Err(invalid("missing block number or log index".into()));
+        let (Some(block_number), Some(log_index), Some(block_hash)) =
+            (log.block_number, log.log_index, log.block_hash)
+        else {
+            return Err(invalid(
+                "missing block number, log index or block hash".into(),
+            ));
         };
         let data = log.data();
         let topic0 = data
@@ -136,6 +152,13 @@ impl PoolLog {
                 PoolEvent::Sync {
                     reserve0: U256::from(e.reserve0),
                     reserve1: U256::from(e.reserve1),
+                }
+            }
+            aerodrome::Sync::SIGNATURE_HASH => {
+                let e = aerodrome::Sync::decode_log_data(data).map_err(decode_err)?;
+                PoolEvent::Sync {
+                    reserve0: e.reserve0,
+                    reserve1: e.reserve1,
                 }
             }
             v3::Swap::SIGNATURE_HASH => {
@@ -170,6 +193,7 @@ impl PoolLog {
         Ok(Self {
             pool: log.address(),
             block_number,
+            block_hash,
             log_index,
             removed: log.removed,
             event,
@@ -194,6 +218,7 @@ mod tests {
                 data,
             },
             block_number: Some(100),
+            block_hash: Some(B256::repeat_byte(0xbb)),
             log_index: Some(7),
             ..Default::default()
         }
@@ -227,6 +252,38 @@ mod tests {
                 reserve0: U256::from(5),
                 reserve1: U256::from(9)
             }
+        );
+    }
+
+    #[test]
+    fn decodes_aerodrome_sync() {
+        let data = aerodrome::Sync {
+            reserve0: U256::from(1) << 200,
+            reserve1: U256::from(9),
+        }
+        .encode_log_data();
+        assert_eq!(
+            PoolLog::decode(&rpc_log(data)).unwrap().event,
+            PoolEvent::Sync {
+                reserve0: U256::from(1) << 200,
+                reserve1: U256::from(9)
+            }
+        );
+    }
+
+    /// Topic hashes checked against logs from live Base pools.
+    #[test]
+    fn topics_match_live_chain() {
+        use alloy::primitives::b256;
+        assert_eq!(
+            TOPICS,
+            [
+                b256!("1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1"),
+                b256!("cf2aa50876cdfbb541206f89af0ee78d44a2abf8d328e37fa4917f982149848a"),
+                b256!("c42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"),
+                b256!("7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde"),
+                b256!("0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c"),
+            ]
         );
     }
 
