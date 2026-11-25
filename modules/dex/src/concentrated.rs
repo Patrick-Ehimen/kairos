@@ -1,5 +1,5 @@
 //! Tick-based concentrated-liquidity pools: Uniswap V3 and V3-compatible
-//! forks (Pancake V3, Sushi V3, …).
+//! forks (Pancake V3, Sushi V3, Aerodrome Slipstream, …).
 
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
@@ -279,6 +279,24 @@ impl ConcentratedLiquidityPool {
     /// Pool fee in hundredths of a basis point.
     pub fn fee_pips(&self) -> u32 {
         self.fee_pips
+    }
+
+    /// Replaces the swap fee, for pools whose fee changes without an event
+    /// (Aerodrome Slipstream's dynamic fee module).
+    ///
+    /// # Errors
+    ///
+    /// [`KairosError::ConfigError`] if `fee_pips >= FEE_DENOMINATOR`; the fee
+    /// is left unchanged.
+    pub fn set_fee_pips(&mut self, fee_pips: u32) -> Result<()> {
+        if fee_pips >= FEE_DENOMINATOR {
+            return Err(KairosError::ConfigError(format!(
+                "pool {}: invalid fee {fee_pips}",
+                self.address
+            )));
+        }
+        self.fee_pips = fee_pips;
+        Ok(())
     }
 
     /// Distance between usable ticks.
@@ -562,6 +580,17 @@ mod tests {
 
     fn fixture() -> ConcentratedLiquidityPool {
         pool()
+    }
+
+    #[test]
+    fn fee_update_changes_quotes_and_rejects_invalid() {
+        let mut pool = pool();
+        let before = pool.swap(true, exact_in(1_000_000)).unwrap().amount_out;
+        pool.set_fee_pips(154).unwrap();
+        let after = pool.swap(true, exact_in(1_000_000)).unwrap().amount_out;
+        assert!(after > before);
+        assert!(pool.set_fee_pips(FEE_DENOMINATOR).is_err());
+        assert_eq!(pool.fee_pips(), 154);
     }
 
     fn tl(gross: u128, net: i128) -> TickLiquidity {

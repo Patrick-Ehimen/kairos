@@ -1,4 +1,5 @@
-//! `x * y = k` pools: Uniswap V2 and its forks (SushiSwap, Camelot V2, …).
+//! `x * y = k` pools: Uniswap V2 and its forks (SushiSwap, Camelot V2,
+//! Aerodrome volatile pools, …).
 
 use alloy::primitives::{Address, Bytes, U256, aliases::U24};
 use kairos_core::{AmmKind, FEE_DENOMINATOR, KairosError, PoolId, ProtocolId, Result, SwapStep};
@@ -72,6 +73,24 @@ impl ConstantProductPool {
     pub fn set_reserves(&mut self, reserve0: U256, reserve1: U256) {
         self.reserve0 = reserve0;
         self.reserve1 = reserve1;
+    }
+
+    /// Replaces the swap fee, for venues whose fee can change after
+    /// deployment (Aerodrome's factory can set a pool's fee).
+    ///
+    /// # Errors
+    ///
+    /// [`KairosError::ConfigError`] if `fee_ppm >= FEE_DENOMINATOR`; the fee
+    /// is left unchanged.
+    pub fn set_fee_ppm(&mut self, fee_ppm: u32) -> Result<()> {
+        if fee_ppm >= FEE_DENOMINATOR {
+            return Err(KairosError::ConfigError(format!(
+                "pool {}: fee {fee_ppm} ppm must be below {FEE_DENOMINATOR}",
+                self.address
+            )));
+        }
+        self.fee_ppm = fee_ppm;
+        Ok(())
     }
 
     /// Current `(reserve0, reserve1)`.
@@ -192,6 +211,21 @@ mod tests {
             U256::from(5_000u128 * ONE_ETH),
         );
         pool
+    }
+
+    #[test]
+    fn fee_update_changes_quotes_and_rejects_invalid() {
+        let mut pool = pool();
+        let before = pool
+            .get_amount_out(WETH, USDC, U256::from(ONE_ETH))
+            .unwrap();
+        pool.set_fee_ppm(500).unwrap();
+        let after = pool
+            .get_amount_out(WETH, USDC, U256::from(ONE_ETH))
+            .unwrap();
+        assert!(after > before);
+        assert!(pool.set_fee_ppm(FEE_DENOMINATOR).is_err());
+        assert_eq!(pool.fee_ppm(), 500);
     }
 
     #[test]

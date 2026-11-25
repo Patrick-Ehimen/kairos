@@ -12,14 +12,14 @@ use crate::{AnyPool, Pool};
 ///
 /// Pool admission (liquidity, volume and age thresholds) is decided before a
 /// pool is registered; the registry only stores and indexes.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct PoolRegistry {
     pools: HashMap<Address, Entry>,
     /// Sorted `(token_a, token_b)` -> addresses of pools trading that pair.
     pair_index: HashMap<(Address, Address), Vec<Address>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Entry {
     pool: AnyPool,
     tier: PoolTier,
