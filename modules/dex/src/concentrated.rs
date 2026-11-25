@@ -28,7 +28,7 @@ pub struct SwapOutcome {
     /// Active liquidity after the swap.
     pub liquidity: u128,
     /// Number of initialized ticks crossed; drives the per-tick gas estimate
-    /// ([`kairos_core::gas::UNIV3_PER_TICK_GAS`]).
+    /// ([`GasEstimates::per_initialized_tick`](kairos_core::GasEstimates::per_initialized_tick)).
     pub initialized_ticks_crossed: u32,
 }
 
@@ -528,7 +528,8 @@ mod tests {
     use super::*;
     use crate::math::Q96;
     use crate::math::sqrt_price_math::{get_amount0_delta, get_amount1_delta};
-    use kairos_core::addresses::{USDC, WETH};
+    const USDC: Address = Address::repeat_byte(0xa0);
+    const WETH: Address = Address::repeat_byte(0xc0);
 
     const UNI_V3: ProtocolId = ProtocolId(2);
     const L: u128 = 1_000_000_000_000_000_000; // 1e18

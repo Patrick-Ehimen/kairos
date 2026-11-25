@@ -140,7 +140,9 @@ mod tests {
     use super::*;
     use crate::{ConcentratedLiquidityPool, ConstantProductPool};
     use kairos_core::ProtocolId;
-    use kairos_core::addresses::{DAI, USDC, WETH};
+    const DAI: Address = Address::repeat_byte(0x6b);
+    const USDC: Address = Address::repeat_byte(0xa0);
+    const WETH: Address = Address::repeat_byte(0xc0);
 
     fn v2(byte: u8, a: Address, b: Address) -> ConstantProductPool {
         let (t0, t1) = pair_key(a, b);

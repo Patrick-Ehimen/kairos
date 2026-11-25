@@ -177,7 +177,8 @@ impl Pool for ConstantProductPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kairos_core::addresses::{USDC, WETH};
+    const USDC: Address = Address::repeat_byte(0xa0);
+    const WETH: Address = Address::repeat_byte(0xc0);
 
     const UNI_V2: ProtocolId = ProtocolId(1);
     const ONE_ETH: u128 = 1_000_000_000_000_000_000;

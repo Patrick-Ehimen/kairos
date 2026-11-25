@@ -67,24 +67,6 @@ pub enum AmmKind {
 }
 
 impl AmmKind {
-    /// Rough gas cost of a single swap in this family.
-    ///
-    /// Used by the detector to estimate route cost before simulation. These are
-    /// heuristics, not exact measurements; the simulator's `gas_used` is the
-    /// authoritative figure. Concentrated-liquidity cost grows with ticks
-    /// crossed, which is accounted for separately via
-    /// [`gas::UNIV3_PER_TICK_GAS`].
-    pub fn base_gas(&self) -> u64 {
-        match self {
-            AmmKind::ConstantProduct => 60_000,
-            AmmKind::ConcentratedLiquidity => 180_000,
-            AmmKind::StableSwap => 130_000,
-            AmmKind::WeightedPool => 120_000,
-            // Not yet measured; placeholder until a LB venue is benchmarked.
-            AmmKind::LiquidityBook => 120_000,
-        }
-    }
-
     /// Whether the executor can build this family's swap call itself.
     ///
     /// When `false` ([`StableSwap`](Self::StableSwap),
@@ -126,22 +108,6 @@ impl TryFrom<u8> for AmmKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ProtocolId(pub u16);
-
-/// Returns the decimals of a well-known mainnet token without an RPC call.
-///
-/// Covers the tokens in [`addresses`]. Returns `None` for anything else, in
-/// which case the caller must fetch `decimals()` from the token contract.
-pub fn known_token_decimals(addr: &Address) -> Option<u8> {
-    use addresses::{DAI, USDC, USDT, WBTC, WETH};
-    match *addr {
-        WETH => Some(18),
-        USDC => Some(6),
-        USDT => Some(6),
-        DAI => Some(18),
-        WBTC => Some(8),
-        _ => None,
-    }
-}
 
 /// Unique identifier for a pool on one chain.
 ///
@@ -203,7 +169,8 @@ pub struct ArbHop {
     pub amount_in: U256,
     /// Raw output amount predicted from cached pool state.
     pub expected_out: U256,
-    /// Estimated gas for this hop (see [`AmmKind::base_gas`]).
+    /// Estimated gas for this hop (see
+    /// [`GasEstimates::hop`](crate::chain::GasEstimates::hop)).
     pub estimated_gas: u64,
 }
 
@@ -391,52 +358,6 @@ pub enum NodeState {
     Failed,
 }
 
-/// Well-known Ethereum mainnet addresses.
-///
-/// These are mainnet-only. Other chains need their own configuration.
-pub mod addresses {
-    use alloy::primitives::{Address, address};
-
-    /// Wrapped Ether (18 decimals).
-    pub const WETH: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
-    /// USD Coin (6 decimals).
-    pub const USDC: Address = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
-    /// Tether USD (6 decimals).
-    pub const USDT: Address = address!("dAC17F958D2ee523a2206206994597C13D831ec7");
-    /// Dai Stablecoin (18 decimals).
-    pub const DAI: Address = address!("6B175474E89094C44Da98b954EedeAC495271d0F");
-    /// Wrapped Bitcoin (8 decimals).
-    pub const WBTC: Address = address!("2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599");
-
-    /// Aave V3 Pool, the flash-loan provider.
-    pub const AAVE_V3_POOL: Address = address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2");
-
-    /// Uniswap V2 factory, used to enumerate and verify V2 pairs.
-    pub const UNISWAP_V2_FACTORY: Address = address!("5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f");
-
-    /// Uniswap V3 factory, used to enumerate and verify V3 pools.
-    pub const UNISWAP_V3_FACTORY: Address = address!("1F98431c8aD98523631AE4a59f267346ea31F984");
-
-    /// SushiSwap factory, used to enumerate and verify Sushi pairs.
-    pub const SUSHISWAP_FACTORY: Address = address!("C0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac");
-}
-
-/// Gas constants used to estimate route cost before simulation.
-///
-/// A route's estimate is roughly
-/// `TX_BASE_GAS + FLASHLOAN_BASE_GAS + EXECUTOR_OVERHEAD_GAS + Σ hop gas`.
-pub mod gas {
-    /// Overhead of the Aave V3 flash loan (borrow, callback and repay).
-    pub const FLASHLOAN_BASE_GAS: u64 = 80_000;
-    /// Intrinsic cost of any Ethereum transaction.
-    pub const TX_BASE_GAS: u64 = 21_000;
-    /// Executor contract overhead outside the swaps themselves (dispatch,
-    /// balance checks, profit transfer).
-    pub const EXECUTOR_OVERHEAD_GAS: u64 = 30_000;
-    /// Extra gas per initialized tick crossed in a Uniswap V3 swap.
-    pub const UNIV3_PER_TICK_GAS: u64 = 5_000;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,7 +367,7 @@ mod tests {
             protocol_id: ProtocolId(1),
             fee_ppm: U24::from(fee_ppm),
             pool: Address::ZERO,
-            token_out: addresses::WETH,
+            token_out: Address::repeat_byte(0xee),
             min_amount_out: U256::from(1),
             data: Bytes::from_static(data),
         }
