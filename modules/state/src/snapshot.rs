@@ -21,6 +21,29 @@ pub struct StateSnapshot {
 }
 
 impl StateSnapshot {
+    /// A snapshot holding `pools`, all live and all changed at `seq`. For
+    /// tests, replays and backtests; [`StateSync`](crate::StateSync) builds
+    /// snapshots itself.
+    pub fn from_pools(
+        seq: u64,
+        block: u64,
+        pools: impl IntoIterator<Item = (AnyPool, kairos_core::PoolTier)>,
+    ) -> Self {
+        let mut registry = PoolRegistry::new();
+        let mut changed_at = HashMap::new();
+        for (pool, tier) in pools {
+            changed_at.insert(kairos_dex::Pool::address(&pool), seq);
+            registry.register(pool, tier);
+        }
+        Self {
+            seq,
+            block,
+            registry,
+            changed_at,
+            syncing: HashSet::new(),
+        }
+    }
+
     /// Sequence number of this snapshot; `0` before the first load.
     pub fn seq(&self) -> u64 {
         self.seq
