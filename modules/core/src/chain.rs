@@ -9,6 +9,11 @@
 //! multicall3 = "0xcA11bde05977b3631167028862bE2a173976CA11"
 //! wrapped_native = "0x4200000000000000000000000000000000000006"
 //!
+//! [data_fee]
+//! kind = "op_stack"
+//! gas_price_oracle = "0x420000000000000000000000000000000000000F"
+//! l1_block = "0x4200000000000000000000000000000000000015"
+//!
 //! [gas]
 //! tx_base = 21000
 //! flashloan = 80000
@@ -24,6 +29,7 @@ use alloy::primitives::Address;
 use serde::Deserialize;
 
 use crate::error::{KairosError, Result};
+use crate::fees::DataFeeConfig;
 use crate::types::AmmKind;
 
 /// Settings for one chain.
@@ -40,6 +46,10 @@ pub struct ChainProfile {
     /// Wrapped native token (WETH). Profits are valued in it, since gas is
     /// paid in the native token.
     pub wrapped_native: Address,
+    /// Where rollup data-fee parameters are read from. `None` for chains
+    /// that charge execution gas only.
+    #[serde(default)]
+    pub data_fee: Option<DataFeeConfig>,
     /// Execution-gas estimates used to rank routes before simulation.
     pub gas: GasEstimates,
 }
@@ -49,9 +59,9 @@ pub struct ChainProfile {
 /// A route's estimate is
 /// `tx_base + flashloan + executor_overhead + Σ hop(kind) + per_initialized_tick × ticks crossed`.
 ///
-/// These are heuristics: simulation reports the real gas used. They cover L2
-/// execution gas only. On rollups, the L1 data fee is charged separately and
-/// is not included here.
+/// These are heuristics: simulation reports the real gas used. They cover
+/// execution gas only; rollup data fees are priced by the chain's
+/// [`GasModel`](crate::GasModel) from the profile's `data_fee` table.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GasEstimates {
@@ -156,6 +166,31 @@ mod tests {
         assert_eq!(p.gas.hop(AmmKind::ConstantProduct), Some(60_000));
         assert_eq!(p.gas.hop(AmmKind::StableSwap), None);
         assert_eq!(p.gas.route_overhead(), 131_000);
+        assert_eq!(p.data_fee, None);
+    }
+
+    #[test]
+    fn parses_op_stack_data_fee() {
+        let text = PROFILE.replace(
+            "[gas]",
+            "[data_fee]\nkind = \"op_stack\"\n\
+             gas_price_oracle = \"0x000000000000000000000000000000000000000f\"\n\
+             l1_block = \"0x0000000000000000000000000000000000000015\"\n\n[gas]",
+        );
+        let p = ChainProfile::from_toml(&text).unwrap();
+        assert_eq!(
+            p.data_fee,
+            Some(DataFeeConfig::OpStack {
+                gas_price_oracle: Address::with_last_byte(0x0f),
+                l1_block: Address::with_last_byte(0x15),
+            })
+        );
+        for bad in [
+            text.replace("op_stack", "arbitrum"),
+            text.replace("l1_block", "l1_blocks"),
+        ] {
+            assert!(ChainProfile::from_toml(&bad).is_err(), "accepted: {bad}");
+        }
     }
 
     #[test]

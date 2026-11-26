@@ -20,6 +20,7 @@ fn profile() -> ChainProfile {
         chain_id: 1,
         multicall3: Address::ZERO,
         wrapped_native: WETH,
+        data_fee: None,
         gas: GasEstimates {
             tx_base: 21_000,
             flashloan: 80_000,
