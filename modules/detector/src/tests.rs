@@ -1,5 +1,7 @@
 use alloy::primitives::{Address, U256};
-use kairos_core::{ChainProfile, GasEstimates, PoolTier, ProtocolId};
+use kairos_core::{
+    ChainProfile, ExecutionFees, GasEstimates, OpStackFees, OperatorFee, PoolTier, ProtocolId,
+};
 use kairos_dex::math::tick_math::get_sqrt_ratio_at_tick;
 use kairos_dex::{AnyPool, ConcentratedLiquidityPool, ConstantProductPool, TickLiquidity};
 use kairos_state::StateSnapshot;
@@ -92,6 +94,9 @@ fn usdc_weth_cl(byte: u8) -> AnyPool {
     p.into()
 }
 
+/// Fees with a zero gas price, so net profit equals gross.
+const FREE: ExecutionFees = ExecutionFees { gas_price_wei: 0 };
+
 fn snapshot(pools: Vec<AnyPool>) -> StateSnapshot {
     StateSnapshot::from_pools(1, 100, pools.into_iter().map(|p| (p, PoolTier::Hot)))
 }
@@ -107,7 +112,7 @@ fn gross_in_start_token(o: &ArbOpportunity) -> U256 {
 #[test]
 fn finds_two_pool_arb_on_one_pair() {
     let snap = snapshot(vec![usdc_weth(1, 2000), usdc_weth(2, 2040)]);
-    let found = detector(DetectorConfig::default()).detect(&snap, &all(&snap), 0);
+    let found = detector(DetectorConfig::default()).detect(&snap, &all(&snap), &FREE);
     assert_eq!(found.len(), 1, "{found:#?}");
     let o = &found[0];
 
@@ -125,7 +130,7 @@ fn finds_two_pool_arb_on_one_pair() {
 #[test]
 fn chosen_size_is_the_profit_maximum() {
     let snap = snapshot(vec![usdc_weth(1, 2000), usdc_weth(2, 2040)]);
-    let o = &detector(DetectorConfig::default()).detect(&snap, &all(&snap), 0)[0];
+    let o = &detector(DetectorConfig::default()).detect(&snap, &all(&snap), &FREE)[0];
     let cycle: Vec<Hop> = o
         .hops
         .iter()
@@ -150,7 +155,7 @@ fn no_arb_when_spread_is_inside_fees() {
     let snap = snapshot(vec![usdc_weth(1, 2000), usdc_weth(2, 2010)]);
     assert!(
         detector(DetectorConfig::default())
-            .detect(&snap, &all(&snap), 0)
+            .detect(&snap, &all(&snap), &FREE)
             .is_empty()
     );
 }
@@ -159,17 +164,20 @@ fn no_arb_when_spread_is_inside_fees() {
 fn gas_price_and_min_profit_filter() {
     let snap = snapshot(vec![usdc_weth(1, 2000), usdc_weth(2, 2040)]);
     let d = detector(DetectorConfig::default());
-    let gross = d.detect(&snap, &all(&snap), 0)[0].total_profit_wei;
+    let gross = d.detect(&snap, &all(&snap), &FREE)[0].total_profit_wei;
 
     // Gas that costs more than the gross profit.
-    let gas_price = (gross / U256::from(251_000u64) + U256::from(1)).to::<u128>();
-    assert!(d.detect(&snap, &all(&snap), gas_price).is_empty());
+    let gas_price_wei = (gross / U256::from(251_000u64) + U256::from(1)).to::<u128>();
+    assert!(
+        d.detect(&snap, &all(&snap), &ExecutionFees { gas_price_wei })
+            .is_empty()
+    );
 
     let d = detector(DetectorConfig {
         min_profit_wei: gross + U256::from(1),
         ..Default::default()
     });
-    assert!(d.detect(&snap, &all(&snap), 0).is_empty());
+    assert!(d.detect(&snap, &all(&snap), &FREE).is_empty());
 }
 
 #[test]
@@ -180,10 +188,10 @@ fn only_cycles_through_changed_pools() {
         usdc_weth(3, 2000),
     ]);
     let d = detector(DetectorConfig::default());
-    assert!(d.detect(&snap, &[], 0).is_empty());
+    assert!(d.detect(&snap, &[], &FREE).is_empty());
 
     // Only pool 1 changed: the 1<>2 cycle, not the equally good 3<>2 one.
-    let found = d.detect(&snap, &[Address::repeat_byte(1)], 0);
+    let found = d.detect(&snap, &[Address::repeat_byte(1)], &FREE);
     assert_eq!(found.len(), 1);
     assert!(
         found[0]
@@ -193,7 +201,7 @@ fn only_cycles_through_changed_pools() {
     );
 
     // All changed: both cycles through the mispriced pool, best first.
-    let found = d.detect(&snap, &all(&snap), 0);
+    let found = d.detect(&snap, &all(&snap), &FREE);
     assert_eq!(found.len(), 2);
     assert!(found[0].net_profit_wei >= found[1].net_profit_wei);
 }
@@ -202,7 +210,7 @@ fn only_cycles_through_changed_pools() {
 fn concentrated_and_constant_product_arb_counts_tick_gas() {
     // The concentrated pool sits near 2000; the constant-product pool at 2060.
     let snap = snapshot(vec![usdc_weth_cl(1), usdc_weth(2, 2060)]);
-    let found = detector(DetectorConfig::default()).detect(&snap, &all(&snap), 0);
+    let found = detector(DetectorConfig::default()).detect(&snap, &all(&snap), &FREE);
     assert_eq!(found.len(), 1, "{found:#?}");
     let o = &found[0];
     let cl_hop = o
@@ -221,7 +229,7 @@ fn non_native_start_token_is_valued_in_wei() {
         start_tokens: vec![USDC],
         ..Default::default()
     })
-    .detect(&snap, &all(&snap), 0);
+    .detect(&snap, &all(&snap), &FREE);
     assert_eq!(found.len(), 1);
     let o = &found[0];
     assert_eq!(o.hops[0].token_in, USDC);
@@ -246,10 +254,66 @@ fn triangle_needs_three_hops() {
         max_hops: 2,
         ..Default::default()
     });
-    assert!(two.detect(&snap, &all(&snap), 0).is_empty());
+    assert!(two.detect(&snap, &all(&snap), &FREE).is_empty());
 
-    let found = detector(DetectorConfig::default()).detect(&snap, &all(&snap), 0);
+    let found = detector(DetectorConfig::default()).detect(&snap, &all(&snap), &FREE);
     assert_eq!(found.len(), 1, "{found:#?}");
     let path: Vec<_> = found[0].hops.iter().map(|h| h.token_in).collect();
     assert_eq!(path, vec![WETH, USDC, DAI]);
+}
+
+/// Base-like OP Stack fees: a 0.006 gwei gas price and the L1 parameters
+/// read from Base on 2026-11-26.
+fn op_stack(gas_price_wei: u128) -> OpStackFees {
+    OpStackFees {
+        gas_price_wei,
+        l1_base_fee: U256::from(59_208_556u64),
+        blob_base_fee: U256::from(3_067_131u64),
+        base_fee_scalar: 2269,
+        blob_base_fee_scalar: 1_055_762,
+        operator_fee: OperatorFee::Jovian {
+            scalar: 0,
+            constant: 0,
+        },
+    }
+}
+
+#[test]
+fn op_stack_l1_data_fee_is_charged() {
+    let snap = snapshot(vec![usdc_weth(1, 2000), usdc_weth(2, 2040)]);
+    let d = detector(DetectorConfig::default());
+    let fees = op_stack(6_000_000);
+    let o = &d.detect(&snap, &all(&snap), &fees)[0];
+    assert_eq!(
+        o.fee.execution_wei,
+        U256::from(o.total_gas) * U256::from(6_000_000u64)
+    );
+    // A two-hop executeArb is 708 bytes of calldata, about 790 unsigned.
+    let l1 = o.fee.l1_data_wei;
+    assert!(
+        l1 > fees.l1_data_fee_upper_bound(780) && l1 < fees.l1_data_fee_upper_bound(820),
+        "{l1}"
+    );
+    assert_eq!(o.fee.operator_wei, U256::ZERO);
+    assert_eq!(o.net_profit_wei, o.total_profit_wei - o.fee.total());
+}
+
+#[test]
+fn longer_routes_pay_more_l1_data_fee() {
+    let pools = vec![
+        usdc_weth(1, 2000),
+        cp(2, USDC, DAI, 10_000_000 * E6, 10_000_000 * E18),
+        cp(3, DAI, WETH, 1900 * 1000 * E18, 1000 * E18),
+        usdc_weth(4, 2040),
+    ];
+    let snap = snapshot(pools);
+    let found = detector(DetectorConfig::default()).detect(&snap, &all(&snap), &op_stack(0));
+    let l1 = |hops: usize| {
+        found
+            .iter()
+            .find(|o| o.hops.len() == hops)
+            .map(|o| o.fee.l1_data_wei)
+            .unwrap()
+    };
+    assert!(l1(3) > l1(2));
 }

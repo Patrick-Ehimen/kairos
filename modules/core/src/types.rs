@@ -31,6 +31,7 @@ use alloy::primitives::{Address, Bytes, U256, aliases::U24};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{KairosError, Result};
+use crate::fees::TxFee;
 
 /// Denominator for pool fees expressed in parts-per-million.
 ///
@@ -269,11 +270,12 @@ pub struct ArbOpportunity {
     pub hops: Vec<ArbHop>,
     /// Gross profit (final output minus initial input), in wei.
     pub total_profit_wei: U256,
-    /// Estimated total gas for the whole route.
+    /// Estimated total execution gas for the whole route.
     pub total_gas: u64,
-    /// `total_gas` priced at the current gas price, in wei.
-    pub gas_cost_wei: U256,
-    /// `total_profit_wei - gas_cost_wei`, in wei.
+    /// Estimated fee of the transaction, by component: execution gas, and
+    /// on rollups the L1 data and operator fees.
+    pub fee: TxFee,
+    /// `total_profit_wei - fee.total()`, in wei.
     pub net_profit_wei: U256,
     /// Block whose state the opportunity was computed against.
     pub block_number: u64,

@@ -11,12 +11,13 @@ use std::time::Duration;
 use alloy::providers::{Provider, ProviderBuilder, WsConnect};
 use kairos_core::{ChainProfile, KairosError, Result};
 use kairos_detector::{Detector, DetectorConfig};
-use kairos_state::{StateConfig, StateSync};
+use kairos_state::{FeeReader, StateConfig, StateSync};
 use tokio::time::{Instant, timeout};
 use tracing_subscriber::EnvFilter;
 
-/// How often the gas price is re-read.
-const GAS_PRICE_REFRESH: Duration = Duration::from_secs(30);
+/// How often fee parameters are re-read. Each refresh is an `eth_gasPrice`
+/// plus, on OP Stack chains, one `eth_call`.
+const FEE_REFRESH: Duration = Duration::from_secs(60);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -53,8 +54,10 @@ async fn main() -> Result<()> {
     let task = tokio::spawn(sync.run());
 
     let deadline = Instant::now() + Duration::from_secs(seconds);
-    let mut gas_price = provider.get_gas_price().await.map_err(rpc)?;
-    let mut gas_read_at = Instant::now();
+    let fee_reader = FeeReader::new(provider.clone(), &profile);
+    let mut fees = fee_reader.read().await?;
+    let mut fees_read_at = Instant::now();
+    println!("fee parameters: {fees:?}");
     let (mut last_seq, mut scans, mut found) = (0, 0u64, 0u64);
     while let Ok(Ok(())) = timeout(
         deadline.saturating_duration_since(Instant::now()),
@@ -62,30 +65,36 @@ async fn main() -> Result<()> {
     )
     .await
     {
-        if gas_read_at.elapsed() >= GAS_PRICE_REFRESH {
-            gas_price = provider.get_gas_price().await.map_err(rpc)?;
-            gas_read_at = Instant::now();
+        if fees_read_at.elapsed() >= FEE_REFRESH {
+            fees = fee_reader.read().await?;
+            fees_read_at = Instant::now();
         }
         let snap = snapshots.borrow_and_update().clone();
         let changed: Vec<_> = snap.changed_since(last_seq).collect();
         last_seq = snap.seq();
         let started = Instant::now();
-        let opportunities = detector.detect(&snap, &changed, gas_price);
+        let opportunities = detector.detect(&snap, &changed, &fees);
         scans += 1;
         for o in &opportunities {
             found += 1;
             println!(
-                "block {} net {} wei (gross {}, gas {} × {gas_price}) in {:?}: {}",
+                "block {} net {} wei (gross {}, execution {} for {} gas, L1 data {}, operator {}) in {:?}: {}",
                 o.block_number,
                 o.net_profit_wei,
                 o.total_profit_wei,
+                o.fee.execution_wei,
                 o.total_gas,
+                o.fee.l1_data_wei,
+                o.fee.operator_wei,
                 started.elapsed(),
                 o.id
             );
         }
     }
     task.abort();
-    println!("{scans} snapshots scanned, {found} opportunities, gas price {gas_price} wei");
+    println!(
+        "{scans} snapshots scanned, {found} opportunities, gas price {} wei",
+        fees.gas_price_wei()
+    );
     Ok(())
 }

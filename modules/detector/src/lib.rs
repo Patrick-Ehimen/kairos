@@ -11,10 +11,12 @@
 //! 3. **Size** survivors with the pools' exact integer quotes, finding the
 //!    input that maximizes gross profit.
 //! 4. **Price** the route in wei: profit is converted to the wrapped native
-//!    token and the chain profile's gas estimate is subtracted.
+//!    token and the transaction's fee is subtracted. The fee comes from the
+//!    chain's [`GasModel`], given the profile's execution-gas estimate and
+//!    the size of the exact `executeArb` transaction the route would send,
+//!    so rollup L1 data fees are included.
 //!
-//! Gas covers L2 execution only. Rollup L1 data fees are not included, and
-//! simulation remains the authority on real profit.
+//! These are estimates; simulation remains the authority on real profit.
 //!
 //! No chain constants live here: tokens and gas come from the
 //! [`ChainProfile`] and [`DetectorConfig`].
@@ -25,8 +27,11 @@ mod sizing;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use alloy::primitives::{Address, I256, U256};
-use kairos_core::{ArbHop, ArbOpportunity, ChainProfile, GasEstimates};
+use alloy::consensus::{SignableTransaction, TxEip1559};
+use alloy::primitives::aliases::U24;
+use alloy::primitives::{Address, I256, TxKind, U256};
+use kairos_core::executor::execute_arb_calldata;
+use kairos_core::{ArbHop, ArbOpportunity, ChainProfile, GasEstimates, GasModel, SwapStep};
 use kairos_dex::{AnyPool, Pool};
 use kairos_state::StateSnapshot;
 use serde::Deserialize;
@@ -64,6 +69,7 @@ pub struct Detector {
     start_tokens: Vec<Address>,
     min_profit_wei: U256,
     wrapped_native: Address,
+    chain_id: u64,
     gas: GasEstimates,
 }
 
@@ -82,18 +88,19 @@ impl Detector {
             start_tokens,
             min_profit_wei: config.min_profit_wei,
             wrapped_native: profile.wrapped_native,
+            chain_id: profile.chain_id,
             gas: profile.gas.clone(),
         }
     }
 
     /// Profitable cycles through any pool in `changed`, most profitable
-    /// first. `gas_price_wei` prices the gas estimate; opportunities whose
+    /// first. `fees` prices each route's transaction; opportunities whose
     /// net profit is below `min_profit_wei` are dropped.
     pub fn detect(
         &self,
         snapshot: &StateSnapshot,
         changed: &[Address],
-        gas_price_wei: u128,
+        fees: &impl GasModel,
     ) -> Vec<ArbOpportunity> {
         let adjacency = Adjacency::new(snapshot);
         let mut found: Vec<ArbOpportunity> = cycles_through(
@@ -105,7 +112,7 @@ impl Detector {
         )
         .into_iter()
         .filter(|cycle| spot_log_return(snapshot, cycle).is_some_and(|r| r > 0.0))
-        .filter_map(|cycle| self.price(snapshot, &cycle, gas_price_wei))
+        .filter_map(|cycle| self.price(snapshot, &cycle, fees))
         .filter(|o| o.net_profit_wei >= self.min_profit_wei)
         .collect();
         found.sort_by(|a, b| b.net_profit_wei.cmp(&a.net_profit_wei));
@@ -116,7 +123,7 @@ impl Detector {
         &self,
         snapshot: &StateSnapshot,
         cycle: &[Hop],
-        gas_price_wei: u128,
+        fees: &impl GasModel,
     ) -> Option<ArbOpportunity> {
         let amounts = sizing::optimal(snapshot, cycle)?;
         let start = cycle[0].token_in;
@@ -141,21 +148,54 @@ impl Detector {
         }
 
         let profit_wei = self.to_native(snapshot, start, gross)?;
-        let gas_cost_wei = U256::from(total_gas) * U256::from(gas_price_wei);
-        let net_profit_wei = profit_wei.checked_sub(gas_cost_wei)?;
+        let fee = fees.fee(total_gas, self.unsigned_tx_size(&hops, amounts[0]));
+        let net_profit_wei = profit_wei.checked_sub(fee.total())?;
         let pools: Vec<String> = cycle.iter().map(|h| h.pool.to_string()).collect();
         Some(ArbOpportunity {
             id: format!("{}:{}", snapshot.block(), pools.join(">")),
             hops,
             total_profit_wei: profit_wei,
             total_gas,
-            gas_cost_wei,
+            fee,
             net_profit_wei,
             block_number: snapshot.block(),
             timestamp_ns: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| d.as_nanos() as i64),
         })
+    }
+
+    /// Size of the unsigned `executeArb` transaction for `hops`, borrowing
+    /// `amount_in` of the first hop's input token. Sized for the worst case:
+    /// nonce, gas limit and fee fields at their widest, so the estimate is
+    /// never short.
+    fn unsigned_tx_size(&self, hops: &[ArbHop], amount_in: U256) -> usize {
+        // Every family the detector prices is encoded by the executor, so
+        // steps carry no calldata of their own.
+        let steps: Vec<SwapStep> = hops
+            .iter()
+            .map(|h| SwapStep {
+                protocol_id: h.protocol_id,
+                fee_ppm: U24::MAX,
+                pool: h.pool_address,
+                token_out: h.token_out,
+                min_amount_out: U256::MAX,
+                data: Default::default(),
+            })
+            .collect();
+        let input = execute_arb_calldata(&steps, hops[0].token_in, amount_in, U256::MAX, U256::MAX);
+        TxEip1559 {
+            chain_id: self.chain_id,
+            nonce: u64::MAX,
+            gas_limit: u64::MAX,
+            max_fee_per_gas: u128::MAX,
+            max_priority_fee_per_gas: u128::MAX,
+            to: TxKind::Call(Address::ZERO),
+            value: U256::ZERO,
+            access_list: Default::default(),
+            input,
+        }
+        .payload_len_for_signature()
     }
 
     /// Gas of one hop, including initialized ticks crossed for
