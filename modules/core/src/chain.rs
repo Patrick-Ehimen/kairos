@@ -7,6 +7,7 @@
 //! name = "base"
 //! chain_id = 8453
 //! multicall3 = "0xcA11bde05977b3631167028862bE2a173976CA11"
+//! wrapped_native = "0x4200000000000000000000000000000000000006"
 //!
 //! [gas]
 //! tx_base = 21000
@@ -36,6 +37,9 @@ pub struct ChainProfile {
     pub chain_id: u64,
     /// Multicall3 deployment, used to batch state reads into one `eth_call`.
     pub multicall3: Address,
+    /// Wrapped native token (WETH). Profits are valued in it, since gas is
+    /// paid in the native token.
+    pub wrapped_native: Address,
     /// Execution-gas estimates used to rank routes before simulation.
     pub gas: GasEstimates,
 }
@@ -134,6 +138,7 @@ mod tests {
         name = "test"
         chain_id = 1337
         multicall3 = "0x00000000000000000000000000000000000000ca"
+        wrapped_native = "0x00000000000000000000000000000000000000ee"
 
         [gas]
         tx_base = 21000
