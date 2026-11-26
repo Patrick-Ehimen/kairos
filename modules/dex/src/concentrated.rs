@@ -1,5 +1,5 @@
 //! Tick-based concentrated-liquidity pools: Uniswap V3 and V3-compatible
-//! forks (Pancake V3, Sushi V3, …).
+//! forks (Pancake V3, Sushi V3, Aerodrome Slipstream, …).
 
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
@@ -28,7 +28,7 @@ pub struct SwapOutcome {
     /// Active liquidity after the swap.
     pub liquidity: u128,
     /// Number of initialized ticks crossed; drives the per-tick gas estimate
-    /// ([`kairos_core::gas::UNIV3_PER_TICK_GAS`]).
+    /// ([`GasEstimates::per_initialized_tick`](kairos_core::GasEstimates::per_initialized_tick)).
     pub initialized_ticks_crossed: u32,
 }
 
@@ -281,6 +281,35 @@ impl ConcentratedLiquidityPool {
         self.fee_pips
     }
 
+    /// Replaces the swap fee, for pools whose fee changes without an event
+    /// (Aerodrome Slipstream's dynamic fee module).
+    ///
+    /// # Errors
+    ///
+    /// [`KairosError::ConfigError`] if `fee_pips >= FEE_DENOMINATOR`; the fee
+    /// is left unchanged.
+    pub fn set_fee_pips(&mut self, fee_pips: u32) -> Result<()> {
+        if fee_pips >= FEE_DENOMINATOR {
+            return Err(KairosError::ConfigError(format!(
+                "pool {}: invalid fee {fee_pips}",
+                self.address
+            )));
+        }
+        self.fee_pips = fee_pips;
+        Ok(())
+    }
+
+    /// Distance between usable ticks.
+    pub fn tick_spacing(&self) -> i32 {
+        self.tick_spacing
+    }
+
+    /// Range the loaded tick data is complete for, or `None` if no ticks have
+    /// been loaded. Swaps that would reach past it return `None`.
+    pub fn tick_coverage(&self) -> Option<RangeInclusive<i32>> {
+        self.tick_coverage.clone()
+    }
+
     /// Simulates `UniswapV3Pool.swap` with the price limit the executor uses
     /// (`MIN_SQRT_RATIO + 1` / `MAX_SQRT_RATIO - 1`).
     ///
@@ -517,7 +546,8 @@ mod tests {
     use super::*;
     use crate::math::Q96;
     use crate::math::sqrt_price_math::{get_amount0_delta, get_amount1_delta};
-    use kairos_core::addresses::{USDC, WETH};
+    const USDC: Address = Address::repeat_byte(0xa0);
+    const WETH: Address = Address::repeat_byte(0xc0);
 
     const UNI_V3: ProtocolId = ProtocolId(2);
     const L: u128 = 1_000_000_000_000_000_000; // 1e18
@@ -550,6 +580,17 @@ mod tests {
 
     fn fixture() -> ConcentratedLiquidityPool {
         pool()
+    }
+
+    #[test]
+    fn fee_update_changes_quotes_and_rejects_invalid() {
+        let mut pool = pool();
+        let before = pool.swap(true, exact_in(1_000_000)).unwrap().amount_out;
+        pool.set_fee_pips(154).unwrap();
+        let after = pool.swap(true, exact_in(1_000_000)).unwrap().amount_out;
+        assert!(after > before);
+        assert!(pool.set_fee_pips(FEE_DENOMINATOR).is_err());
+        assert_eq!(pool.fee_pips(), 154);
     }
 
     fn tl(gross: u128, net: i128) -> TickLiquidity {

@@ -9,3 +9,12 @@ repository.workspace = true
 [dependencies]
 kairos-core.workspace = true
 kairos-dex.workspace = true
+alloy.workspace = true
+serde.workspace = true
+toml.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

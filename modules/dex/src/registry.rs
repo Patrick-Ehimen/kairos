@@ -12,14 +12,14 @@ use crate::{AnyPool, Pool};
 ///
 /// Pool admission (liquidity, volume and age thresholds) is decided before a
 /// pool is registered; the registry only stores and indexes.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct PoolRegistry {
     pools: HashMap<Address, Entry>,
     /// Sorted `(token_a, token_b)` -> addresses of pools trading that pair.
     pair_index: HashMap<(Address, Address), Vec<Address>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Entry {
     pool: AnyPool,
     tier: PoolTier,
@@ -140,7 +140,9 @@ mod tests {
     use super::*;
     use crate::{ConcentratedLiquidityPool, ConstantProductPool};
     use kairos_core::ProtocolId;
-    use kairos_core::addresses::{DAI, USDC, WETH};
+    const DAI: Address = Address::repeat_byte(0x6b);
+    const USDC: Address = Address::repeat_byte(0xa0);
+    const WETH: Address = Address::repeat_byte(0xc0);
 
     fn v2(byte: u8, a: Address, b: Address) -> ConstantProductPool {
         let (t0, t1) = pair_key(a, b);
