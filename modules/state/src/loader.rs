@@ -73,29 +73,84 @@ pub struct PoolLoader<P> {
 }
 
 /// One call in a multicall batch, decoded by the caller.
-struct Call {
+pub(crate) struct Call {
     target: Address,
     data: Bytes,
+    allow_failure: bool,
 }
 
-fn call<C: SolCall>(target: Address, c: C) -> Call {
+pub(crate) fn call<C: SolCall>(target: Address, c: C) -> Call {
     Call {
         target,
         data: c.abi_encode().into(),
+        allow_failure: false,
     }
 }
 
-fn decode<C: SolCall>(pool: Address, data: &Bytes) -> Result<C::Return> {
+/// Like [`call`], but a revert does not fail the batch: its slot in the
+/// results is `None`.
+pub(crate) fn optional_call<C: SolCall>(target: Address, c: C) -> Call {
+    Call {
+        allow_failure: true,
+        ..call(target, c)
+    }
+}
+
+pub(crate) fn decode<C: SolCall>(target: Address, data: &Bytes) -> Result<C::Return> {
     C::abi_decode_returns(data).map_err(|e| {
-        KairosError::NodeConnectionFailed(format!(
-            "pool {pool}: cannot decode {}: {e}",
-            C::SIGNATURE
-        ))
+        KairosError::NodeConnectionFailed(format!("{target}: cannot decode {}: {e}", C::SIGNATURE))
     })
 }
 
-fn rpc_err(context: &str, e: impl std::fmt::Display) -> KairosError {
+pub(crate) fn rpc_err(context: &str, e: impl std::fmt::Display) -> KairosError {
     KairosError::NodeConnectionFailed(format!("{context}: {e}"))
+}
+
+/// Runs `calls` at `block` through the Multicall3 deployment at `multicall`
+/// and returns each call's return data, or `None` for an
+/// [`optional_call`] that reverted. A required call that fails fails the
+/// whole batch.
+pub(crate) async fn multicall<P: Provider>(
+    provider: &P,
+    multicall: Address,
+    calls: &[Call],
+    block: BlockId,
+) -> Result<Vec<Option<Bytes>>> {
+    let mut out = Vec::with_capacity(calls.len());
+    for chunk in calls.chunks(MAX_CALLS_PER_MULTICALL) {
+        let request = abi::aggregate3Call {
+            calls: chunk
+                .iter()
+                .map(|c| abi::Call3 {
+                    target: c.target,
+                    allowFailure: c.allow_failure,
+                    callData: c.data.clone(),
+                })
+                .collect(),
+        };
+        let tx = TransactionRequest::default()
+            .to(multicall)
+            .input(request.abi_encode().into());
+        let raw = provider
+            .call(tx)
+            .block(block)
+            .await
+            .map_err(|e| rpc_err("multicall", e))?;
+        let results = abi::aggregate3Call::abi_decode_returns(&raw)
+            .map_err(|e| rpc_err("multicall: bad response", e))?;
+        if results.len() != chunk.len() {
+            return Err(rpc_err(
+                "multicall",
+                format!("{} results for {} calls", results.len(), chunk.len()),
+            ));
+        }
+        out.extend(
+            results
+                .into_iter()
+                .map(|r| r.success.then_some(r.returnData)),
+        );
+    }
+    Ok(out)
 }
 
 /// Range of tick-bitmap words to load around `tick`, and the range of ticks
@@ -137,41 +192,13 @@ impl<P: Provider + Clone> PoolLoader<P> {
             .map_err(|e| rpc_err("eth_blockNumber", e))
     }
 
-    /// Runs `calls` at `block` and returns each call's return data. Any
-    /// failing call fails the whole batch.
     async fn multicall(&self, calls: &[Call], block: BlockId) -> Result<Vec<Bytes>> {
-        let mut out = Vec::with_capacity(calls.len());
-        for chunk in calls.chunks(MAX_CALLS_PER_MULTICALL) {
-            let request = abi::aggregate3Call {
-                calls: chunk
-                    .iter()
-                    .map(|c| abi::Call3 {
-                        target: c.target,
-                        allowFailure: false,
-                        callData: c.data.clone(),
-                    })
-                    .collect(),
-            };
-            let tx = TransactionRequest::default()
-                .to(self.multicall)
-                .input(request.abi_encode().into());
-            let raw = self
-                .provider
-                .call(tx)
-                .block(block)
-                .await
-                .map_err(|e| rpc_err("multicall", e))?;
-            let results = abi::aggregate3Call::abi_decode_returns(&raw)
-                .map_err(|e| rpc_err("multicall: bad response", e))?;
-            if results.len() != chunk.len() {
-                return Err(rpc_err(
-                    "multicall",
-                    format!("{} results for {} calls", results.len(), chunk.len()),
-                ));
-            }
-            out.extend(results.into_iter().map(|r| r.returnData));
-        }
-        Ok(out)
+        let results = multicall(&self.provider, self.multicall, calls, block).await?;
+        // Every call the loader makes is required, so none is `None`.
+        results
+            .into_iter()
+            .map(|r| r.ok_or_else(|| KairosError::Internal("required call failed".into())))
+            .collect()
     }
 
     /// Loads every pool in `configs` as of `block`.
