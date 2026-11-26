@@ -16,7 +16,7 @@ kairos-state = { path = "modules/state" }
 kairos-sim = { path = "modules/sim" }
 kairos-detector = { path = "modules/detector" }
 kairos-server = { path = "modules/server" }
-alloy = { version = "1", features = ["full"] }
+alloy = { version = "2", features = ["full"] }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
