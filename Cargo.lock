@@ -2687,10 +2687,13 @@ dependencies = [
 name = "kairos-detector"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "kairos-core",
  "kairos-dex",
- "kairos-sim",
  "kairos-state",
+ "serde",
+ "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]

@@ -10,4 +10,9 @@ repository.workspace = true
 kairos-core.workspace = true
 kairos-dex.workspace = true
 kairos-state.workspace = true
-kairos-sim.workspace = true
+alloy.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tracing-subscriber.workspace = true
