@@ -19,6 +19,11 @@ kairos-server = { path = "modules/server" }
 alloy = { version = "1", features = ["full"] }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [profile.release]
 lto = "thin"

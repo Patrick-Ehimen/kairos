@@ -16,4 +16,3 @@ kairos-dex.workspace = true
 kairos-state.workspace = true
 kairos-sim.workspace = true
 kairos-detector.workspace = true
-kairos-server.workspace = true
